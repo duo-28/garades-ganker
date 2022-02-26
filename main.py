@@ -32,6 +32,54 @@ async def on_ready():
 
 ###################################################################################################
 
+def check_gank_time(userid):
+    userstats = db[str(userid)].value
+    if userstats["Time"] != "Indefinite" and userstats["Time"] != "None":
+        # gets time till user leaves location
+        time_now = datetime.datetime.now()
+        initial_time = datetime.datetime.strptime(userstats["Time"][1], "%m/%d/%Y %H:%M:%S")
+        delta_time = time_now - initial_time
+        delta_time_seconds = delta_time.total_seconds()
+        time_left_sec = int(userstats["Time"][0]) * 60 - delta_time_seconds  # in seconds
+        # reset time, gankability, location if timer is over
+        if time_left_sec <= 0:
+            db[str(userid)]["Gankable"] = False
+            db[str(userid)]["Location"] = "None"
+            db[str(userid)]["Time"] = "None"
+
+###################################################################################################
+
+@bot.command()
+# help command
+async def help(ctx, arg=""):
+    if arg == "":
+        help_embed = discord.Embed(
+            title="Help Menu",
+            description="noob"
+        )
+        help_embed.add_field(
+            name="enroll",
+            value="enroll in the gank program",
+            inline=False)
+        help_embed.add_field(
+            name="profile",
+            value="view your profile\n (shortcut - p)",
+            inline=False)
+        help_embed.add_field(
+            name="location",
+            value="set your location and time ur available for so others can gank u\n[Parameter: minutes]\n (shortcut - l)",
+            inline=False)
+        help_embed.add_field(
+            name="ungank",
+            value="stop yourself from being ganked\n (shortcut - u)",
+            inline=False)
+        help_embed.add_field(
+            name="gank",
+            value="view a list of possible targets\n (shortcut - g)",
+            inline=False)
+    await ctx.channel.send(embed=help_embed)
+
+
 @bot.command()
 # enroll command
 async def enroll(ctx):
@@ -43,12 +91,13 @@ async def enroll(ctx):
         userstats = {
             "Name": username,
             "Gankable": False,
-            "Location": ["None", "None"],
+            "Location": "None",
+            "Status": "None",
+            "Time": "None",
             "Target": "None",
             "History": {},
             "Extra": []
         }
-        
         db[userid] = userstats
 
         intro_embed = discord.Embed(
@@ -57,21 +106,21 @@ async def enroll(ctx):
             color=discord.Color.blue())
         intro_embed.add_field(
             name="Info",
-            value="The goal of this bot is to display gank availability"
-        )
+            value="The goal of this bot is to display gank availability")
         intro_embed.set_footer(text="use " + prefix + "help to learn more")
         await ctx.channel.send(embed=intro_embed)
     else:
         await ctx.channel.send("You have already enrolled")
 
 
-@bot.command()
+@bot.command(aliases=['p'])
 # profile info command
 async def profile(ctx):
     # gets user id
     userid = ctx.message.author.id
     # checks if user is in database
     if str(userid) in db.keys():
+        check_gank_time(userid)
         # get user info
         userstats = db[str(userid)].value
         avatar_url = ctx.message.author.avatar_url
@@ -85,9 +134,29 @@ async def profile(ctx):
             value=str(userstats["Gankable"]),
             inline=False)
         profile_embed.add_field(
-            name="Building | Room",
-            value=str(userstats["Location"][0]) + " | " + str(userstats["Location"][1]),
+            name="Location",
+            value=str(userstats["Location"]),
             inline=False)
+        if userstats["Time"] == "Indefinite" or userstats["Time"] == "None":
+            profile_embed.add_field(
+                name="Location Timer",
+                value=userstats["Time"],
+                inline=False)
+        else:
+            # gets time till user leaves location
+            time_now = datetime.datetime.now()
+            initial_time = datetime.datetime.strptime(userstats["Time"][1], "%m/%d/%Y %H:%M:%S")
+            delta_time = time_now - initial_time
+            delta_time_seconds = delta_time.total_seconds()
+            time_left_sec = int(userstats["Time"][0]) * 60 - delta_time_seconds  # in seconds
+            time_left_min = divmod(time_left_sec, 60)
+            time_left_hour = divmod(time_left_min[0], 60)
+            time_left_final = str(round(time_left_hour[0])) + "hr " + str(round(time_left_hour[1])) + "min " + str(round(time_left_min[1])) + "s"
+            
+            profile_embed.add_field(
+                name="Location Timer",
+                value=time_left_final,
+                inline=False)
         profile_embed.add_field(
             name="Target",
             value=str(userstats["Target"]),
@@ -97,38 +166,101 @@ async def profile(ctx):
         await ctx.channel.send("Use " + prefix + "enroll to begin")
 
 
-@bot.command()
-# toggle gankable info command
-async def gankable(ctx):
+@bot.command(aliases=['l'])
+# location check command
+async def location(ctx, arg=""):
     # gets user id
     userid = ctx.message.author.id
     # checks if user is in database
     if str(userid) in db.keys():
-        # get user info
-        userstats = db[str(userid)].value
-        # status message
-        status_message = ""
-        # boolean switch
-        if userstats["Gankable"]:
-            db[str(userid)]["Gankable"] = False
-            status_message = "Not Gankable"
-        else:
-            db[str(userid)]["Gankable"] = True
-            status_message = "Gankable"
-        # toggled gankability message
-        gankable_embed = discord.Embed(
-            title="Gankable?",
-            description="Your status has been toggled to **"+status_message+"**",
-            color=discord.Color.blue()
+        # ask for location
+        location_embed = discord.Embed(
+            title="Where are you right now?",
+            description="suspicious",
+            color=discord.Color.purple()
         )
-        await ctx.channel.send(embed=gankable_embed)        
+        await ctx.channel.send(embed=location_embed)
+        # get user answer
+        def check(m):
+            return m.author == ctx.message.author and m.channel == ctx.channel
+        try:
+            msg = await bot.wait_for('message', timeout=10.0, check=check)
+        except asyncio.TimeoutError:
+            await ctx.channel.send(
+                "*-- Command timeout: You were too slow --*"
+            )
+        else:
+            # storing location
+            location = msg.content
+            db[str(userid)]["Location"] = location
+            db[str(userid)]["Gankable"] = True            
+            # receipt ig
+            receipt_embed = discord.Embed(
+                title="Details confirmed",
+                description="",
+                color=discord.Color.green()
+            )
+            receipt_embed.add_field(
+                name="Your location has been set to",
+                value=db[str(userid)]["Location"],
+                inline=False
+            )
+            # storing + displaying time
+            if arg == "":
+                db[str(userid)]["Time"] = "Indefinite"
+                receipt_embed.add_field(
+                    name="Location timer has been set to",
+                    value="Indefinite",
+                    inline=False
+                )
+            elif arg.isnumeric():
+                time_now = datetime.datetime.now()
+                time_now = time_now.strftime('%m/%d/%Y %H:%M:%S')
+                # sets time to a tuple with timer and initial time
+                db[str(userid)]["Time"] = (int(arg), time_now)
+                receipt_embed.add_field(
+                    name="Location timer has been set to",
+                    value=str(db[str(userid)]["Time"][0])+" minutes",
+                    inline=False
+                )
+            else:
+                db[str(userid)]["Time"] = "Indefinite"
+                receipt_embed.add_field(
+                    name="Sus",
+                    value="The time you set is invalid, please enter an integer of minutes",
+                    inline=False
+                )
+            receipt_embed.set_footer(text="you are now gankable 😉")
+            await ctx.channel.send(embed=receipt_embed)
     else:
         await ctx.channel.send("Use " + prefix + "enroll to begin")
 
 
-@bot.command()
+@bot.command(aliases=['u'])
+# ungank command
+async def ungank(ctx):
+    # gets user id
+    userid = ctx.message.author.id
+    # checks if user is in database
+    if str(userid) in db.keys():
+        # not gankable anymore + location/time reset
+        db[str(userid)]["Gankable"] = False
+        db[str(userid)]["Location"] = "None"
+        db[str(userid)]["Time"] = "None"
+        # gankability message
+        gankable_embed = discord.Embed(
+            title="Ungankable",
+            description="You can't be ganked anymore and your location has been cleared!",
+            color=discord.Color.green()
+        )
+        await ctx.channel.send(embed=gankable_embed)
+    else:
+        await ctx.channel.send("Use " + prefix + "enroll to begin")
+
+
+@bot.command(aliases=['g'])
 # gank check command
-async def gank(ctx):
+async def gank(ctx, arg=""):
     # gets user id
     userid = ctx.message.author.id
     # checks if user is in database
@@ -136,10 +268,12 @@ async def gank(ctx):
         player_list = db.keys()
         server_player_dict = {}
         for i in player_list:
+            check_gank_time(str(i))
             if ctx.guild.get_member(int(i)) is not None and db[str(i)]["Gankable"]:
                 name = db[str(i)]["Name"]
                 location = db[str(i)]["Location"]
-                server_player_dict[i] = [location, name]
+                time = db[str(i)]["Time"]
+                server_player_dict[i] = [location, name, time]
         # make embed with gank list
         server_players = discord.Embed(
             title="Gank List",
@@ -147,9 +281,22 @@ async def gank(ctx):
             color=discord.Color.blue()
         )
         for user in server_player_dict:
+            if server_player_dict[user][2] == "Indefinite" or server_player_dict[user][2] == "None":
+                time_available = "Indefinite"
+            else:
+                # gets time till user leaves location
+                time_now = datetime.datetime.now()
+                initial_time = datetime.datetime.strptime(server_player_dict[user][2][1], "%m/%d/%Y %H:%M:%S")
+                delta_time = time_now - initial_time
+                delta_time_seconds = delta_time.total_seconds()
+                time_left_sec = int(server_player_dict[user][2][0]) * 60 - delta_time_seconds  # in seconds
+                time_left_min = divmod(time_left_sec, 60)
+                time_left_hour = divmod(time_left_min[0], 60)
+                time_available = str(round(time_left_hour[0])) + "hr " + str(round(time_left_hour[1])) + "min " + str(round(time_left_min[1])) + "s"
+
             server_players.add_field(
                 name=server_player_dict[user][1],
-                value="Location: " + str(server_player_dict[user][0][0]) + " | " + str(server_player_dict[user][0][1]),
+                value="**Location:** " + str(server_player_dict[user][0]) + "\n**Available for:** " + time_available,
                 inline=False
             )
         await ctx.channel.send(embed=server_players)
@@ -160,7 +307,7 @@ async def gank(ctx):
 
 @bot.command()
 # TESTING delete user key
-async def delkey(ctx):
+async def unenroll(ctx):
     # gets user id
     userid = ctx.message.author.id
     del db[str(userid)]
