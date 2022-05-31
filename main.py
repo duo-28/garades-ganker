@@ -85,7 +85,7 @@ async def help(ctx, arg=""):
             inline=False)
         help_embed.add_field(
             name="location",
-            value="set your location and time ur available for so others can gank u\n[Parameter: minutes]\n (shortcut - l)",
+            value="set your location and time ur available for\n[Parameter: minutes]\n (shortcut - l)\n(eg. g!l 69, which sets your location for 69min)",
             inline=False)
         help_embed.add_field(
             name="ungank",
@@ -104,6 +104,20 @@ async def help(ctx, arg=""):
             value="view campus map\n (shortcut - m)",
             inline=False)
     await ctx.channel.send(embed=help_embed)
+
+
+@bot.command()
+# updates command
+async def updates(ctx):
+    update_embed = discord.Embed(
+        title="Announcement",
+        description="yes",
+        color=discord.Color.blue())
+    update_embed.add_field(
+        name="Updates",
+        value="- Location command has been changed for ease of use\n - Indefinite locations no longer exists to prevent false info\n - The cap for time at a location has been set to 24 hrs\n - Everyone has been unenrolled for this update")
+    update_embed.set_footer(text="For feedback or suggestions, please spam this channel or ping **garade#7409**")
+    await ctx.channel.send(embed=update_embed)
 
 
 @bot.command()
@@ -195,7 +209,7 @@ async def profile(ctx):
         else:
             profile_embed.add_field(
                 name="Ganked by no one",
-                value="A lonely soul you are",
+                value="L + no maidens",
                 inline=False)
         
         await ctx.channel.send(embed=profile_embed)
@@ -253,7 +267,7 @@ async def location(ctx, arg=""):
         # ask for location
         location_embed = discord.Embed(
             title="Where are you right now?",
-            description="suspicious",
+            description="Enter where you will be",
             color=discord.Color.purple()
         )
         await ctx.channel.send(embed=location_embed)
@@ -284,13 +298,49 @@ async def location(ctx, arg=""):
             )
             # storing + displaying time
             if arg == "":
-                db[str(userid)]["Time"] = "Indefinite"
-                receipt_embed.add_field(
-                    name="Location timer has been set to",
-                    value="Indefinite",
-                    inline=False
+                # ask for time
+                time_embed = discord.Embed(
+                    title="How long will you be there?",
+                    description="Enter time in minutes [Max 1440 min]",
+                    color=discord.Color.purple()
                 )
+                await ctx.channel.send(embed=time_embed)
+                # get user answer
+                def check(m):
+                    return m.author == ctx.message.author and m.channel == ctx.channel
+                try:
+                    msg = await bot.wait_for('message', timeout=10.0, check=check)
+                except asyncio.TimeoutError:
+                    await ctx.channel.send(
+                        "*-- Command timeout: You were too slow --*"
+                    )
+                else:
+                    # storing time
+                    time = msg.content
+                    if time.isnumeric():
+                        # max time to 24hr
+                        if int(time) > 1440:
+                            time = "1440"
+                        time_now = datetime.datetime.now()
+                        time_now = time_now.strftime('%m/%d/%Y %H:%M:%S')
+                        # sets time to a tuple with timer and initial time
+                        db[str(userid)]["Time"] = (int(time), time_now)
+                        receipt_embed.add_field(
+                            name="Location timer has been set to",
+                            value=str(db[str(userid)]["Time"][0])+" minutes",
+                            inline=False
+                        )
+                    else:
+                        db[str(userid)]["Time"] = "Indefinite"
+                        receipt_embed.add_field(
+                            name="Sus",
+                            value="The time you set is invalid, please enter an integer of minutes\n Location will be reset in 1 minute",
+                            inline=False
+                        )
             elif arg.isnumeric():
+                # max time to 24hr
+                if int(arg) > 1440:
+                    arg = "1440"
                 time_now = datetime.datetime.now()
                 time_now = time_now.strftime('%m/%d/%Y %H:%M:%S')
                 # sets time to a tuple with timer and initial time
@@ -304,7 +354,7 @@ async def location(ctx, arg=""):
                 db[str(userid)]["Time"] = "Indefinite"
                 receipt_embed.add_field(
                     name="Sus",
-                    value="The time you set is invalid, please enter an integer of minutes",
+                    value="The time you set is invalid, please enter an integer of minutes\n Location will be reset in 1 minute",
                     inline=False
                 )
             receipt_embed.set_footer(text="you are now gankable 😉")
@@ -428,7 +478,7 @@ async def gank(ctx, *, arg: discord.User = None):
                     
                 
             else:
-                await ctx.channel.send("*-- This user is not enrolled--*")
+                await ctx.channel.send("*-- This user is not enrolled --*")
     else:
         await ctx.channel.send("Use " + prefix + "enroll to begin")
 
@@ -440,16 +490,19 @@ async def cancel(ctx):
     userid = ctx.message.author.id
     # checks if user is in database
     if str(userid) in db.keys():
-        targetid = str(db[str(userid)]["Target"])
-        ganked_list = db[targetid]["Ganked"]
-        ganked_list.remove(str(db[str(userid)]["Name"]))
-        db[targetid]["Ganked"] = ganked_list
-        cancel_embed = discord.Embed(
-            title="Cancelled",
-            description="You are no longer ganking anyone",
-            color=discord.Color.blue()
-        )
-        await ctx.channel.send(embed=cancel_embed)
+        if db[str(userid)]["Target"] != "None":
+            targetid = str(db[str(userid)]["Target"])
+            ganked_list = db[targetid]["Ganked"]
+            ganked_list.remove(str(db[str(userid)]["Name"]))
+            db[targetid]["Ganked"] = ganked_list
+            cancel_embed = discord.Embed(
+                title="Cancelled",
+                description="You are no longer ganking anyone",
+                color=discord.Color.blue()
+            )
+            await ctx.channel.send(embed=cancel_embed)
+        else:
+            await ctx.channel.send("*-- You do not have a target --*")
     else:
         await ctx.channel.send("Use " + prefix + "enroll to begin")
 
@@ -470,6 +523,7 @@ async def unenroll(ctx):
     # gets user id
     userid = ctx.message.author.id
     del db[str(userid)]
+    db.clear()
     await ctx.channel.send("progress deleted")
 
 
